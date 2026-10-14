@@ -15,6 +15,11 @@ legacy_v1/
 # Generated release archives
 *.zip
 
+# Local Windows runtime binaries
+*.exe
+*.dll
+platforms/
+
 # Local editor / OS files
 .vscode/
 .idea/
