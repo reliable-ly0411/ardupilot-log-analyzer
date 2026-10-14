@@ -1,0 +1,22 @@
+# Qt / local builds
+build/
+成品/
+legacy_v1/
+平台/
+*.user
+*.pro.user
+
+# Local application state and test output
+飞析设置.ini
+试飞记录/
+验证/
+备份原版/
+
+# Generated release archives
+*.zip
+
+# Local editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

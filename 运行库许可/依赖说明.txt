@@ -1,0 +1,4 @@
+﻿飞析使用 Qt 5.15.2 Core / Gui / Widgets / PrintSupport 和 Windows 平台插件，动态链接。
+Qt 许可说明及 LGPL/GPL 文本随本目录保留；对应源代码：https://download.qt.io/archive/qt/5.15/5.15.2/single/
+MinGW 运行依赖：libgcc_s_seh-1.dll、libstdc++-6.dll、libwinpthread-1.dll；许可文本分别保留在 gcc、winpthreads 和 mingw-w64。
+本文件描述第三方运行依赖，不改变项目自身的权属或许可。
