@@ -32,7 +32,16 @@ try {
     & $makePath -j4
     if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
     Copy-Item -LiteralPath (Join-Path $buildRoot 'release\ArduPilotLogAnalyzer.exe') -Destination (Join-Path $projectRoot '飞析.exe') -Force
-    Write-Host 'Built: 飞析.exe'
+    foreach ($name in @('Qt5Core.dll','Qt5Gui.dll','Qt5Widgets.dll','Qt5PrintSupport.dll')) {
+        Copy-Item -LiteralPath (Join-Path $QtRoot ('bin\' + $name)) -Destination $projectRoot -Force
+    }
+    foreach ($name in @('libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')) {
+        Copy-Item -LiteralPath (Join-Path $MinGWRoot ('bin\' + $name)) -Destination $projectRoot -Force
+    }
+    $platformDirectory = Join-Path $projectRoot 'platforms'
+    New-Item -ItemType Directory -Path $platformDirectory -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $QtRoot 'plugins\platforms\qwindows.dll') -Destination $platformDirectory -Force
+    Write-Host 'Built: 飞析.exe (runtime dependencies included)' 
     if ($Verify) {
         Set-Location -LiteralPath $projectRoot
         & python '测试\generate_fixtures.py'

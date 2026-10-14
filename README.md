@@ -24,11 +24,13 @@
 
 ## 从源码构建
 
-需要 Qt 5.15.2 MinGW 8.1 和 Python 3。默认路径是 `F:\Qt.15.2\mingw81_64` 与 `F:\Qt\Tools\mingw810_64`，也可以传入 `-QtRoot` 和 `-MinGWRoot`：
+需要 Qt 5.15.2 MinGW 8.1 和 Python 3。默认路径是 `F:\Qt\5.15.2\mingw81_64` 与 `F:\Qt\Tools\mingw810_64`，也可以传入 `-QtRoot` 和 `-MinGWRoot`：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\构建.ps1 -Verify
 ```
+
+构建脚本会从指定的 Qt / MinGW 安装目录复制必要运行库，不要求把 DLL 提交到源码仓库。构建后可执行 `powershell -ExecutionPolicy Bypass -File .\打包.ps1` 生成运行包。
 
 `-Verify` 会生成可重复的正常、异常和缺字段样例，并运行回归检查。源码设计说明在 [`源码/README.md`](源码/README.md)。
 
@@ -46,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\构建.ps1 -Verify
 
 如果这个工具帮你节省了日志复盘时间，欢迎自愿支持后续维护。捐助完全自愿，不影响软件使用、下载或获得帮助。
 
-![微信支付二维码](assets/wechat-donation.png)
+<img src="assets/wechat-donation.png" alt="微信自愿捐助二维码" width="360">
 
 ## 贡献与反馈
 
