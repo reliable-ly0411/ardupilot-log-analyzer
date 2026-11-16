@@ -232,7 +232,8 @@ QString knownUnit(const QString& type, const QString& field)
     if (type == "VIBE" && field.startsWith("Clip")) return QStringLiteral("次");
     if ((type == "BAT" && field.startsWith("Volt")) || (type == "POWR" && field.startsWith('V'))) return QStringLiteral("V");
     if (type == "BAT" && field == "Curr") return QStringLiteral("A");
-    if (type == "BAT" && field == "CurrTot") return QStringLiteral("Ah");
+    // DataFlash BAT stores CurrTot in mAh; raw curves/export retain that value.
+    if (type == "BAT" && field == "CurrTot") return QStringLiteral("mAh");
     if (type == "BAT" && field == "EnrgTot") return QStringLiteral("Wh");
     if (type == "BAT" && field == "RemPct") return QStringLiteral("%");
     if (field == "Temp") return QStringLiteral("°C");
@@ -678,7 +679,8 @@ void processMessage(ParseState& state, const QString& type, const DecodedMessage
         ++summary.samples;
         const double voltage = numberValue(message, {"Volt", "Voltage"}, std::numeric_limits<double>::quiet_NaN());
         const double current = numberValue(message, {"Curr", "Current"}, std::numeric_limits<double>::quiet_NaN());
-        const double consumedAh = numberValue(message, {"CurrTot"}, std::numeric_limits<double>::quiet_NaN());
+        // ArduPilot BAT CurrTot is consumed_mah, including logs without FMTU.
+        const double consumedAh = numberValue(message, {"CurrTot"}, std::numeric_limits<double>::quiet_NaN()) / 1000.0;
         const double consumedWh = numberValue(message, {"EnrgTot"}, std::numeric_limits<double>::quiet_NaN());
         const double remaining = numberValue(message, {"RemPct"}, std::numeric_limits<double>::quiet_NaN());
         const double temperature = numberValue(message, {"Temp"}, std::numeric_limits<double>::quiet_NaN());
@@ -700,7 +702,12 @@ void processMessage(ParseState& state, const QString& type, const DecodedMessage
     }
     if (type == QStringLiteral("ARSP")) {
         state.arspSeen = true;
-        const bool primary = !message.numbers.contains(QStringLiteral("Pri")) || numberValue(message, {"Pri"}) > 0.5;
+        // Pri is a zero-based sensor index, not a per-record boolean.
+        // Legacy records without Pri select instance 0, never mix instances.
+        const double instance = numberValue(message, {"Inst", "Instance", "I"}, 0);
+        const double primaryIndex = numberValue(message, {"Pri"}, 0);
+        const bool primary = finite(instance) && instance >= 0 && instance == std::floor(instance)
+            && instance == primaryIndex;
         const bool healthy = !message.numbers.contains(QStringLiteral("H")) || numberValue(message, {"H"}) > 0.5;
         if (primary && healthy) {
             state.arspHealthy = true;

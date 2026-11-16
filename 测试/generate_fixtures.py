@@ -21,11 +21,11 @@ FORMATS=[
 (144,'RATE','Qffffff','TimeUS,RDes,R,PDes,P,YDes,Y'),
 (145,'PIDR','Qfffffff','TimeUS,Tar,Act,Err,P,I,D,FF'),
 ]
-CODES={'Q':'Q','B':'B','I':'I','H':'H','f':'f','L':'i','N':'16s','Z':'64s'}
+CODES={'Q':'Q','b':'b','B':'B','I':'I','H':'H','f':'f','L':'i','N':'16s','Z':'64s','n':'4s','d':'d'}
 def pack(fmt,values):
  converted=[]
  for code,value in zip(fmt,values):
-  if code in 'NZ': value=str(value).encode('ascii')
+  if code in 'nNZ': value=str(value).encode('ascii')
   if code=='L': value=round(value*1e7)
   converted.append(value)
  return struct.pack('<'+''.join(CODES[c] for c in fmt),*converted)
@@ -70,8 +70,8 @@ def generate(path, faulty=False, missing=False):
   add('GPS',us,0,2 if gpsLoss else 3,6 if gpsLoss else 16,3.5 if gpsLoss else 0.8,lat,lng,alt+15,speed,0)
   add('GPS',us,1,3,19,0.6,lat,lng,alt+15,speed,0)
   voltage=20.4 if faulty and 180<=t<=185 else 25.0-t/200
-  add('BAT',us,0,voltage,16+speed*0.6,t/100,t/4,100-t/4,30,1)
-  add('BAT',us,1,12.5,2,t/300,t/20,95,28,1)
+  add('BAT',us,0,voltage,16+speed*0.6,t*10,t/4,100-t/4,30,1)
+  add('BAT',us,1,12.5,2,t*1000/300,t/20,95,28,1)
   # A 100 ms peak between the old 200 ms sampling instants.
   spike=faulty and k==6005
   if spike:clip+=4
@@ -93,7 +93,44 @@ def generate(path, faulty=False, missing=False):
   add('RCOU',us,pwm,pwm+2,pwm+3,pwm+1)
  path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
  return len(data)
+def write_records(path, formats, records):
+ data=bytearray(); lookup={name:(typeid,fmt) for typeid,name,fmt,columns in formats}
+ for typeid,name,fmt,columns in formats:
+  size=3+struct.calcsize('<'+''.join(CODES[c] for c in fmt))
+  data.extend(b'\xa3\x95\x80'+struct.pack('<BB4s16s64s',typeid,size,name.encode(),fmt.encode(),columns.encode()))
+ for name,values in records:
+  typeid,fmt=lookup[name];data.extend(b'\xa3\x95'+bytes([typeid])+pack(fmt,values))
+ path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
+
+def generate_semantics():
+ # Official BAT wire values are mAh, even when FMTU/UNIT/MULT are absent.
+ bat=(136,'BAT','QBffff','TimeUS,Inst,Volt,Curr,CurrTot,EnrgTot')
+ arm=(131,'ARM','QB','TimeUS,ArmState')
+ metadata=[(146,'UNIT','QbZ','TimeUS,Id,Label'),(147,'MULT','Qbd','TimeUS,Id,Mult'),(148,'FMTU','QBNN','TimeUS,FmtType,UnitIds,MultIds')]
+ # b is a signed byte, used by the official UNIT/MULT format.
+ records=[('ARM',(10000000,1)),('ARM',(230000000,0))]
+ for t,a,b in [(10,100,500),(100,1100,1000),(150,100,100),(230,1300,600)]:
+  for inst,value in enumerate((a,b)):
+   records.append(('BAT',(t*1000000,inst,24,10,value,value/50)))
+ for with_metadata in (False,True):
+  prefix=[]
+  if with_metadata:
+   prefix=[('UNIT',(1000000,ord('a'),'Ah')),('MULT',(1000000,ord('C'),0.001)),('FMTU',(1000000,136,'s#vAah','F-00C0'))]
+  write_records(ROOT/'测试'/('battery_metadata.BIN' if with_metadata else 'battery_legacy.BIN'),[arm,bat]+(metadata if with_metadata else []),prefix+records)
+ arsp=(149,'ARSP','QBfBB','TimeUS,I,Airspeed,H,Pri')
+ records=[('ARM',(10000000,1)),('ARM',(230000000,0))]
+ for t,pri,h in [(10,0,1),(20,1,1),(30,1,0),(40,0,1)]:
+  for i in (0,1):records.append(('ARSP',(t*1000000,i,10+i*10, h if i==pri else 1,pri)))
+ write_records(ROOT/'测试'/'airspeed_primary.BIN',[arm,arsp],records)
+ for field in ('I','Inst','Instance'):
+  records=[('ARM',(10000000,1)),('ARM',(230000000,0))]
+  for t in (10,20):
+   for i in (0,1):records.append(('ARSP',(t*1000000,i,10+i*10)))
+  write_records(ROOT/'测试'/('airspeed_legacy_'+field+'.BIN'),[arm,(149,'ARSP','QBf','TimeUS,'+field+',Airspeed')],records)
+ write_records(ROOT/'测试'/'airspeed_single.BIN',[arm,(149,'ARSP','Qf','TimeUS,Airspeed')],[('ARM',(10000000,1)),('ARM',(230000000,0)),('ARSP',(10000000,12))])
+
 if __name__=='__main__':
+ generate_semantics()
  print('normal:',generate(ROOT/'测试'/'normal.BIN'))
  print('faulty:',generate(ROOT/'示例日志'/'QuadPlane_教学示例.BIN',True))
  print('missing:',generate(ROOT/'测试'/'missing.BIN',missing=True))

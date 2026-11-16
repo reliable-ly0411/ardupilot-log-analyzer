@@ -73,6 +73,23 @@ int runRegression(const QString& directory,const QString& output)
     check("GPS instances isolated",series(faulty,"GPS.NSats") && series(faulty,"GPS[1].NSats") && series(faulty,"GPS.NSats")->points.size()==2400 && series(faulty,"GPS[1].NSats")->points.size()==2400);
     check("EKF cores isolated",series(faulty,"XKF4.SV") && series(faulty,"XKF4[1].SV") && series(faulty,"XKF4.SV")->points.size()==2400);
     check("flight consumption subtracts initial cumulative counter",!normal.batteries.isEmpty() && std::abs(normal.batteries.first().consumedAh-2.2)<0.001);
+    for (const QString& file : {QStringLiteral("battery_metadata.BIN"), QStringLiteral("battery_legacy.BIN")}) {
+        const LogReport r=parse(fixtures.filePath(file));
+        const Series* raw=series(r,"BAT.CurrTot");const Series* ah=series(r,"bat0_consumed_ah");
+        check(file+" raw mAh and engineering Ah remain distinct",r.valid && raw && ah && raw->unit=="mAh" && ah->unit=="Ah" && raw->points.size()==4 && ah->points.size()==4 && std::abs(raw->points.first().y()-100)<0.001 && std::abs(ah->points.first().y()-0.1)<0.00001);
+        check(file+" subtracts initial counters and ignores resets per battery",r.batteries.size()==2 && std::abs(r.batteries[0].consumedAh-2.2)<0.00001 && std::abs(r.batteries[1].consumedAh-1.0)<0.00001);
+    }
+    {
+        const LogReport r=parse(fixtures.filePath("airspeed_primary.BIN"));const Series* air=series(r,"airspeed");
+        check("ARSP primary index 0, switch to 1, unhealthy primary and switch back",r.valid && air && air->points==QVector<QPointF>{{10,10},{20,20},{40,10}} && std::abs(r.maxAirSpeed-20)<0.001);
+        check("ARSP raw instances retain non-primary and unhealthy samples",series(r,"ARSP.Airspeed") && series(r,"ARSP[1].Airspeed") && series(r,"ARSP.Airspeed")->points.size()==4 && series(r,"ARSP[1].Airspeed")->points.size()==4);
+        for(const QString& field : {QStringLiteral("I"),QStringLiteral("Inst"),QStringLiteral("Instance")}) {
+            const LogReport legacy=parse(fixtures.filePath("airspeed_legacy_"+field+".BIN"));const Series* selected=series(legacy,"airspeed");
+            check("ARSP missing Pri/H selects only instance zero: "+field,legacy.valid && selected && selected->points==QVector<QPointF>{{10,10},{20,10}});
+        }
+        const LogReport single=parse(fixtures.filePath("airspeed_single.BIN"));const Series* selected=series(single,"airspeed");
+        check("legacy ARSP without instance/Pri/H remains supported",single.valid && selected && selected->points==QVector<QPointF>{{10,12}});
+    }
     check("error clear does not count as new error",faulty.errorCount==1);
     check("failsafe clear does not count as trigger",faulty.failsafeCount==1 && !has(faulty,QStringLiteral("状态消息"),115000000));
     check("battery low voltage uses logged threshold and interval",has(faulty,QStringLiteral("严重低电门限"),180000000));
@@ -139,12 +156,17 @@ int runRegression(const QString& directory,const QString& output)
         plot->setTimeWindow(120.8,121.4);check("precise interval entry",std::abs(plot->visibleBounds().width()-0.6)<0.0001);
         check("CSV exports current raw interval",plot->exportVisibleCsv(artifacts.filePath("evidence.csv")));
         QFile csv(artifacts.filePath("evidence.csv"));csv.open(QIODevice::ReadOnly);const QByteArray bytes=csv.readAll();check("CSV includes known spike and UTF-8 BOM",bytes.startsWith("\xEF\xBB\xBF") && bytes.contains(",85\r\n"));
+        plot->setSeriesKeys({"BAT.CurrTot","bat0_consumed_ah"});plot->setTimeWindow(10,10.1);
+        check("battery CSV export succeeds",plot->exportVisibleCsv(artifacts.filePath("battery.csv")));
+        QFile batteryCsv(artifacts.filePath("battery.csv"));batteryCsv.open(QIODevice::ReadOnly);const QByteArray batteryBytes=batteryCsv.readAll();
+        check("battery CSV labels raw mAh and derived Ah correctly",batteryBytes.contains("\"mAh\",100\r\n") && batteryBytes.contains("\"Ah\",0.1\r\n"));
         plot->resetView();const double flightWidth=plot->visibleBounds().width();plot->setFullLog(true);check("full log includes ground data",plot->visibleBounds().width()>flightWidth);plot->setFullLog(false);
         plot->setSeriesKeys({"ATT.DesRoll","ATT.Roll"});plot->setTimeWindow(80,95);plot->setIndependentAxes(false);const QRectF before=plot->visibleBounds();plot->zoomIn();check("chart zoom changes time and value ranges",plot->visibleBounds().width()<before.width() && plot->visibleBounds().height()<before.height());plot->resetView();plot->setIndependentAxes(true);
         nav->setCurrentRow(8);window.findChild<QLineEdit*>("testId")->setText(QStringLiteral("回归测试，非真实试飞"));window.findChild<QTextEdit*>("testNotes")->setPlainText(QStringLiteral("证据：横滚误差持续 3 秒。待验证假设：控制余量。<escaped>"));pump(800);
         check("report writes successfully",window.writeReport(artifacts.filePath("teaching_report.html")));
         check("PDF report writes successfully",window.writePdf(artifacts.filePath("teaching_report.pdf")));
         QFile html(artifacts.filePath("teaching_report.html"));html.open(QIODevice::ReadOnly);const QString report=QString::fromUtf8(html.readAll());check("report includes notes, evidence, coverage, thresholds and embedded chart",report.contains(QStringLiteral("回归测试")) && report.contains("&lt;escaped&gt;") && report.contains(QStringLiteral("检查覆盖")) && report.contains(QStringLiteral("筛查门限")) && report.contains("data:image/png;base64,"));
+        check("battery report uses converted flight consumption",report.contains("2.20 Ah / 55.0 Wh"));
         const QString priorPath=window.report().filePath;window.openLog(fixtures.filePath("invalid.BIN"));pump(300);
         check("failed import preserves previous report",window.report().valid && window.report().filePath==priorPath);
         window.findChild<QLineEdit*>("findingSearch")->setText(QStringLiteral("振动"));
@@ -160,6 +182,6 @@ int runRegression(const QString& directory,const QString& output)
         check("usable at 1024 x 680",window.width()==1024 && plot->width()>=350 && plot->height()>=280);
         window.close();pump();
     }
-    QJsonObject result;result.insert("passed",passed);result.insert("checks",checks);result.insert("checkCount",checks.size());result.insert("scope",QStringLiteral("人工合成 DataFlash 日志与 Windows Qt UI；未使用真实试飞日志。"));
+    QJsonObject result;result.insert("passed",passed);result.insert("checks",checks);result.insert("checkCount",checks.size());result.insert("scope",QStringLiteral("人工合成 DataFlash 日志与 Qt UI；平台：%1；未使用真实试飞日志。").arg(QApplication::platformName()));
     QFile file(output);if(!file.open(QIODevice::WriteOnly))return 2;file.write(QJsonDocument(result).toJson(QJsonDocument::Indented));return passed?0:1;
 }
