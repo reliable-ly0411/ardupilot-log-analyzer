@@ -25,6 +25,7 @@
 #include <QTreeWidget>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace {
 LogReport parse(const QString& file,bool cancel=false)
@@ -72,7 +73,29 @@ int runRegression(const QString& directory,const QString& output)
     check("ground attitude error excluded from measured findings",has(faulty,QStringLiteral("横滚目标"),85000000) && std::none_of(faulty.findings.cbegin(),faulty.findings.cend(),[](const Finding& f){return f.category==QStringLiteral("姿态控制") && f.timeUs<10000000;}));
     check("GPS instances isolated",series(faulty,"GPS.NSats") && series(faulty,"GPS[1].NSats") && series(faulty,"GPS.NSats")->points.size()==2400 && series(faulty,"GPS[1].NSats")->points.size()==2400);
     check("EKF cores isolated",series(faulty,"XKF4.SV") && series(faulty,"XKF4[1].SV") && series(faulty,"XKF4.SV")->points.size()==2400);
-    check("flight consumption subtracts initial cumulative counter",!normal.batteries.isEmpty() && std::abs(normal.batteries.first().consumedAh-2.2)<0.001);
+    const QString batteryUnitsPath=fixtures.filePath("battery_units.BIN");
+    const LogReport batteryUnits=parse(batteryUnitsPath);
+    const Series* mainCharge=series(batteryUnits,"BAT.CurrTot");
+    const Series* mainDerivedCharge=series(batteryUnits,"bat0_consumed_ah");
+    const Series* auxCharge=series(batteryUnits,"BAT[1].CurrTot");
+    const Series* mainEnergy=series(batteryUnits,"BAT.EnrgTot");
+    auto sampleAt=[](const Series* s,double time) {
+        if(s) for(const QPointF& point:s->points) if(std::abs(point.x()-time)<1e-6) return point.y();
+        return std::numeric_limits<double>::quiet_NaN();
+    };
+    check("BAT.CurrTot raw and derived values share Ah after decoding mAh",
+          mainCharge && mainDerivedCharge && mainCharge->unit=="Ah" && mainDerivedCharge->unit=="Ah" &&
+          std::abs(sampleAt(mainCharge,10)-0.1)<1e-7 && std::abs(sampleAt(mainCharge,230)-2.3)<1e-7 &&
+          std::abs(sampleAt(mainDerivedCharge,10)-0.1)<1e-7 && std::abs(sampleAt(mainDerivedCharge,230)-2.3)<1e-7);
+    check("flight consumption subtracts initial cumulative counter",!batteryUnits.batteries.isEmpty() && std::abs(batteryUnits.batteries.first().consumedAh-2.2)<0.001);
+    const auto auxBattery=std::find_if(batteryUnits.batteries.cbegin(),batteryUnits.batteries.cend(),[](const BatterySummary& b){return b.instance==1;});
+    check("second battery reset does not contaminate charge totals",
+          auxCharge && auxCharge->unit=="Ah" && auxBattery!=batteryUnits.batteries.cend() &&
+          std::abs(sampleAt(auxCharge,10)-0.44)<1e-7 && std::abs(sampleAt(auxCharge,120))<1e-7 &&
+          std::abs(auxBattery->consumedAh-0.8796)<1e-6);
+    check("BAT.EnrgTot remains Wh and is not scaled as charge",
+          mainEnergy && mainEnergy->unit=="Wh" && !batteryUnits.batteries.isEmpty() &&
+          std::abs(sampleAt(mainEnergy,230)-57.5)<1e-7 && std::abs(batteryUnits.batteries.first().consumedWh-55)<1e-6);
     check("error clear does not count as new error",faulty.errorCount==1);
     check("failsafe clear does not count as trigger",faulty.failsafeCount==1 && !has(faulty,QStringLiteral("状态消息"),115000000));
     check("battery low voltage uses logged threshold and interval",has(faulty,QStringLiteral("严重低电门限"),180000000));
@@ -160,6 +183,25 @@ int runRegression(const QString& directory,const QString& output)
         check("usable at 1024 x 680",window.width()==1024 && plot->width()>=350 && plot->height()>=280);
         window.close();pump();
     }
-    QJsonObject result;result.insert("passed",passed);result.insert("checks",checks);result.insert("checkCount",checks.size());result.insert("scope",QStringLiteral("人工合成 DataFlash 日志与 Windows Qt UI；未使用真实试飞日志。"));
+    {
+        MainWindow window;
+        const bool batteryLoaded=load(window,batteryUnitsPath);
+        auto* plot=window.findChild<PlotWidget*>("chartPlot");
+        if(plot) plot->setSeriesKeys({"BAT.CurrTot","BAT.EnrgTot"});
+        if(plot) plot->setTimeWindow(9.99,10.01);
+        const QString batteryCsvPath=artifacts.filePath("battery_units.csv");
+        const bool batteryCsvWritten=batteryLoaded && plot && plot->exportVisibleCsv(batteryCsvPath);
+        QFile batteryCsv(batteryCsvPath);batteryCsv.open(QIODevice::ReadOnly);
+        const QByteArray batteryCsvBytes=batteryCsv.readAll();
+        check("battery CSV keeps converted charge separate from unscaled energy",
+              batteryCsvWritten && batteryCsvBytes.contains(",\"BAT.CurrTot\",\"Ah\",0.1\r\n") &&
+              batteryCsvBytes.contains(",\"BAT.EnrgTot\",\"Wh\",2.5\r\n"));
+        const QString reportPath=artifacts.filePath("battery_units.html");
+        const bool reportWritten=batteryLoaded && window.writeReport(reportPath);
+        QFile reportFile(reportPath);reportFile.open(QIODevice::ReadOnly);
+        check("HTML reports window charge and energy with distinct units",
+              reportWritten && QString::fromUtf8(reportFile.readAll()).contains(QStringLiteral("2.20 Ah / 55.0 Wh")));
+    }
+    QJsonObject result;result.insert("passed",passed);result.insert("checks",checks);result.insert("checkCount",checks.size());result.insert("scope",QStringLiteral("人工合成 DataFlash 日志与 Qt UI；未使用真实试飞日志。"));
     QFile file(output);if(!file.open(QIODevice::WriteOnly))return 2;file.write(QJsonDocument(result).toJson(QJsonDocument::Indented));return passed?0:1;
 }

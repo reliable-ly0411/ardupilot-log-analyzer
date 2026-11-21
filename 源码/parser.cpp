@@ -140,7 +140,14 @@ DecodedMessage decode(const uchar* payload, int payloadSize, const FormatDefinit
         if (code == 'n' || code == 'N' || code == 'Z') {
             result.strings.insert(column, asciiString(payload + offset, size));
         } else if (code != 'a') {
-            result.numbers.insert(column, readNumber(payload + offset, code));
+            double value = readNumber(payload + offset, code);
+            // ArduPilot BAT.CurrTot's float is recorded in mAh (FMTU unit
+            // 'a', multiplier 'C' = 1e-3). Normalize at decode so the raw
+            // field series and the derived battery summary both use Ah.
+            if (format.name == "BAT" && column == "CurrTot" && code == 'f') {
+                value *= 1e-3;
+            }
+            result.numbers.insert(column, value);
         }
         offset += size;
     }

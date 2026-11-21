@@ -26,6 +26,8 @@ powershell -ExecutionPolicy Bypass -File .\构建.ps1 -Verify
 
 新增规则应附可重复的正常/异常/缺失证据用例，并说明工况、单位、时间窗口和筛查门限。不能将“缺少数据”或“未触发某规则”等同于飞行正常。
 
-前转换规则的状态定义已核对官方 Plane 4.5/4.6；同时要求 Trn、Ast、模式与机型证据，其他版本不猜测。所有符合条件的重复区间和飞控事件均保留。当前回归共 50 项。
+前转换规则的状态定义已核对官方 Plane 4.5/4.6；同时要求 Trn、Ast、模式与机型证据，其他版本不猜测。所有符合条件的重复区间和飞控事件均保留。当前回归共 55 项。
+
+官方 ArduPilot DataFlash `BAT.CurrTot` 的浮点原始值为 mAh，解码为 Ah 后才供曲线、CSV 和报告使用；`BAT.EnrgTot` 本身是 Wh，不做该换算。回归样例使用 Plane-4.6.0 的 BAT 字段布局与单位/倍率定义，覆盖两路电池、非零初始值及计数器复位。历史教学样例的合成电量曾以 Ah 写入 BAT 原始字段，原样保留，不再作为电量数值基准；请使用独立的 battery_units.BIN。此变更并不引入通用 FMTU/UNIT/MULT 换算。
 
 从根目录执行 `powershell -ExecutionPolicy Bypass -File .\打包.ps1` 生成运行包；已有成品目录时用 `-Destination` 指定新目录。

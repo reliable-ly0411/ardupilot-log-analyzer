@@ -21,7 +21,7 @@ FORMATS=[
 (144,'RATE','Qffffff','TimeUS,RDes,R,PDes,P,YDes,Y'),
 (145,'PIDR','Qfffffff','TimeUS,Tar,Act,Err,P,I,D,FF'),
 ]
-CODES={'Q':'Q','B':'B','I':'I','H':'H','f':'f','L':'i','N':'16s','Z':'64s'}
+CODES={'Q':'Q','B':'B','I':'I','H':'H','f':'f','L':'i','N':'16s','Z':'64s','b':'b','c':'h','d':'d'}
 def pack(fmt,values):
  converted=[]
  for code,value in zip(fmt,values):
@@ -93,6 +93,38 @@ def generate(path, faulty=False, missing=False):
   add('RCOU',us,pwm,pwm+2,pwm+3,pwm+1)
  path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
  return len(data)
+def generate_battery_units(path):
+ # Plane-4.6.0 BAT schema: CurrTot is logged as mAh (a/C), EnrgTot as Wh (X/0).
+ formats=[
+  (129,'MSG','QZ','TimeUS,Message'),
+  (131,'ARM','QB','TimeUS,ArmState'),
+  (136,'BAT','QBfffffcfBBB','TimeUS,Inst,Volt,VoltR,Curr,CurrTot,EnrgTot,Temp,Res,RemPct,H,SH'),
+  (146,'UNIT','QbZ','TimeUS,Id,Label'),
+  (147,'MULT','Qbd','TimeUS,Id,Mult'),
+  (148,'FMTU','QBNN','TimeUS,FmtType,UnitIds,MultIds'),
+ ]
+ data=bytearray()
+ lookup={name:(typeid,fmt) for typeid,name,fmt,columns in formats}
+ for typeid,name,fmt,columns in formats:
+  size=3+struct.calcsize('<'+''.join(CODES[c] for c in fmt))
+  data.extend(bytes([0xA3,0x95,0x80])+struct.pack('<BB4s16s64s',typeid,size,name.encode(),fmt.encode(),columns.encode()))
+ def add(name,*values):
+  typeid,fmt=lookup[name]
+  data.extend(bytes([0xA3,0x95,typeid])+pack(fmt,values))
+ add('UNIT',0,ord('a'),'Ah')
+ add('UNIT',0,ord('X'),'W.h')
+ add('MULT',0,ord('C'),0.001)
+ add('MULT',0,ord('0'),1.0)
+ add('FMTU',0,136,'s#vvAaXOw%-%','F-000C0?0000')
+ add('MSG',1000000,'ArduPlane V4.6.0 (synthetic battery fixture)')
+ for t in (1,10,60,119.9,120,170,230,240):
+  us=round(t*1e6)
+  if t==10:add('ARM',us,1)
+  for inst,charge,energy in ((0,t*10,t/4),(1,400+t*4 if t<120 else (t-120)*4,t/20)):
+   add('BAT',us,inst,25,25.1,16,charge,energy,3000,0.012,95,1,0)
+  if t==230:add('ARM',us,0)
+ path.write_bytes(data)
+
 if __name__=='__main__':
  print('normal:',generate(ROOT/'测试'/'normal.BIN'))
  print('faulty:',generate(ROOT/'示例日志'/'QuadPlane_教学示例.BIN',True))
@@ -100,3 +132,4 @@ if __name__=='__main__':
  (ROOT/'测试'/'invalid.BIN').write_bytes(b'not a DataFlash log'*20)
  # Structurally valid but no timed records: must be rejected.
  full=(ROOT/'测试'/'normal.BIN').read_bytes();(ROOT/'测试'/'fmt_only.BIN').write_bytes(full[:89*len(FORMATS)])
+ generate_battery_units(ROOT/'测试'/'battery_units.BIN')
